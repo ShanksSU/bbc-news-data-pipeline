@@ -1,0 +1,19 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Airflow logs
+airflow/logs/
+
+# Airflow DAG outputs
+airflow/dags/output/
+
+# LDA models
+airflow/models/
+
+# MongoDB data volume
+data/mongo/
+
+# Temporary files
+temp/
