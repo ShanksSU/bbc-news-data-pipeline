@@ -5,33 +5,18 @@ __pycache__/
 *.pyd
 
 # Airflow logs and runtime output
-airflow/logs/
 airflow/logs/*
 airflow/dags/output/
 airflow/dags/output/*
 
 # Airflow models (LDA output, huge files)
-airflow/models/
 airflow/models/*
 
 # MongoDB persistent data
-data/mongo/
 data/mongo/*
-
-# Temporary files
-temp/
-temp/*
 
 # System files
 .DS_Store
-
-# Env files
-.env
-
-# Python virtual environments
-venv/
-.env/
-.venv/
 
 # PyCharm / VSCode
 .idea/
