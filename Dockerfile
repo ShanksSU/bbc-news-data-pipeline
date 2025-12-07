@@ -1,22 +1,17 @@
 FROM apache/airflow:2.10.5
 
 USER root
-
-# install system packages as root (allowed)
 RUN apt-get update && \
     apt-get install -y --no-install-recommends git && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt /opt/airflow/requirements.txt
 
-# switch to airflow user BEFORE pip install
+# 仍然用 airflow user 裝 pip（官方建議也偏向這樣）
 USER airflow
-
-# install Python deps as airflow user
 RUN pip install --no-cache-dir apache-airflow-providers-openlineage && \
     pip install --no-cache-dir -r /opt/airflow/requirements.txt
 
-# download nltk data as airflow user
 RUN python -m nltk.downloader -d /opt/airflow/nltk_data \
     stopwords \
     punkt \
@@ -28,8 +23,14 @@ RUN python -m nltk.downloader -d /opt/airflow/nltk_data \
     vader_lexicon \
     universal_tagset
 
-# set nltk data path
 ENV NLTK_DATA=/opt/airflow/nltk_data
 ENV TWISTED_REACTOR=twisted.internet.asyncioreactor.AsyncioSelectorReactor
-
 WORKDIR /opt/airflow
+
+USER root
+RUN set -eux; \
+    PY="$(python -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"; \
+    SITE="$(python -c 'import site; print(site.getsitepackages()[0])')"; \
+    echo "/home/airflow/.local/lib/python${PY}/site-packages" > "${SITE}/airflow_user_site.pth"; \
+    ln -sf /home/airflow/.local/bin/airflow /usr/local/bin/airflow; \
+    ln -sf /home/airflow/.local/bin/celery  /usr/local/bin/celery || true
