@@ -1,7 +1,10 @@
 from datetime import datetime
+import os
+import subprocess
 import requests
 from bs4 import BeautifulSoup as bs
 import pymongo
+
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 
@@ -16,6 +19,7 @@ from nlp_tasks.stats_visualization import visualize_pipeline_stats
 
 BASE_URL = "https://www.bbc.com/sitemaps/https-index-com-news.xml"
 
+# Remove duplicated URLs in MongoDB collection
 def remove_duplicate_urls(collection):
     pipeline = [
         {"$group": {
@@ -40,8 +44,7 @@ def remove_duplicate_urls(collection):
     else:
         print("[DEDUPE] No duplicates found.")
 
-
-# parse child sitemap files
+# Parse one child sitemap and insert news URLs into MongoDB
 def parse_sitemap(url, collection):
     print(f"[SITEMAP] Parsing: {url}")
 
@@ -75,8 +78,7 @@ def parse_sitemap(url, collection):
 
     print(f"[SITEMAP] Inserted {inserted} URLs from {url}")
 
-
-# fetch all sitemap URLs
+# Fetch root sitemap, then parse all child sitemaps
 def get_urls_from_sitemap(root_sitemap):
     client = pymongo.MongoClient("mongo", 27017)
     db = client.bbcnews
@@ -105,8 +107,7 @@ def get_urls_from_sitemap(root_sitemap):
 
     print("[ROOT] All links collected successfully.")
 
-
-# Count documents
+# Count documents in MongoDB collections
 def get_docs_count():
     client = pymongo.MongoClient("mongo", 27017)
     db = client.bbcnews
@@ -117,17 +118,12 @@ def get_docs_count():
     print(f"[COUNT] links={lc}, articles={ac}")
     return {"links_count": lc, "articles_count": ac}
 
-
-# crapy spider execution
+# Run Scrapy spider to crawl news pages
 def crawl_news(**context):
-    import subprocess
-    import os
-
-    counts = context["ti"].xcom_pull(task_ids="get_docs_count")
-    docs_count = counts["links_count"]
+    counts = context["ti"].xcom_pull(task_ids="get_docs_count") or {}
+    docs_count = counts.get("links_count", 0)
 
     scrapy_path = "/opt/airflow/scraper"
-
     if not os.path.exists(os.path.join(scrapy_path, "scrapy.cfg")):
         raise FileNotFoundError("scrapy.cfg not found inside Airflow container.")
 
@@ -147,6 +143,97 @@ def crawl_news(**context):
 
     print("[SCRAPY] Completed successfully.")
 
+
+# Wrapper to avoid Jinja string issue and get counts from XCom
+def data_preparation_wrapper(**context):
+    counts = context["ti"].xcom_pull(task_ids="get_docs_count")
+    return process(counts=counts)
+
+# Train a fixed 32-topic model
+def topic_model_32_wrapper(**context):
+    # 固定 32 topics
+    return topic_model(
+        num_topics=32,
+        auto_tune=False,
+        topn_words=10,
+        save_vis=True,
+    )
+
+# Train a fixed 12-topic model
+def topic_model_12_wrapper(**context):
+    return topic_model(
+        num_topics=12,
+        auto_tune=False,
+        topn_words=10,
+        save_vis=True,
+    )
+
+# Auto-tune: scan k and pick the best number of topics
+def topic_model_auto_wrapper(**context):
+    return topic_model(
+        auto_tune=True,
+        topic_min=8,
+        topic_max=40,
+        topic_step=2,
+        topn_words=10,
+        save_vis=True,
+        scan_passes=5,
+        scan_iterations=200,
+        final_passes=10,
+        final_iterations=400,
+    )
+
+# Collect topic outputs and push to XCom
+def publish_topic_outputs(**context):
+    ti = context["ti"]
+
+    # Get results from topic model tasks
+    res12 = ti.xcom_pull(task_ids="topic_model_12") or {}
+    res32 = ti.xcom_pull(task_ids="topic_model_32") or {}
+    resa = ti.xcom_pull(task_ids="topic_model_auto") or {}
+
+    # Push readable summaries to XCom
+    ti.xcom_push(key="topics_summary_12", value=res12.get("topics_summary", ""))
+    ti.xcom_push(key="topics_summary_32", value=res32.get("topics_summary", ""))
+    ti.xcom_push(key="topics_summary_auto", value=resa.get("topics_summary", ""))
+
+    # Push structured topics dict to XCom
+    ti.xcom_push(key="topics_12", value=res12.get("topics", {}))
+    ti.xcom_push(key="topics_32", value=res32.get("topics", {}))
+    ti.xcom_push(key="topics_auto", value=resa.get("topics", {}))
+
+    # Push article CSV paths to XCom
+    ti.xcom_push(key="articles_csv_12", value=res12.get("articles_csv_path", ""))
+    ti.xcom_push(key="articles_csv_32", value=res32.get("articles_csv_path", ""))
+    ti.xcom_push(key="articles_csv_auto", value=resa.get("articles_csv_path", ""))
+
+    # Push topic words CSV paths to XCom
+    ti.xcom_push(key="topics_csv_12", value=res12.get("topics_csv_path", ""))
+    ti.xcom_push(key="topics_csv_32", value=res32.get("topics_csv_path", ""))
+    ti.xcom_push(key="topics_csv_auto", value=resa.get("topics_csv_path", ""))
+
+    # Push auto-tune best k to XCom
+    ti.xcom_push(key="best_k_auto", value=resa.get("best_num_topics", resa.get("num_topics", "")))
+    ti.xcom_push(key="coherence_auto", value=resa.get("coherence", ""))
+
+    # Optional: also push top words from latest saved models
+    ti.xcom_push(key="lda_top_words_12", value=get_lda_top_words(num_topics=12, topn=10))
+    ti.xcom_push(key="lda_top_words_32", value=get_lda_top_words(num_topics=32, topn=10))
+
+    # Print summaries in task logs
+    print("===== Topics 12 =====")
+    print(res12.get("topics_summary", ""))
+    print("===== Topics 32 =====")
+    print(res32.get("topics_summary", ""))
+    print("===== Topics AUTO =====")
+    print(resa.get("topics_summary", ""))
+    print(f"[AUTO] best_k={resa.get('best_num_topics', resa.get('num_topics'))}, coherence={resa.get('coherence')}")
+    if resa.get("scan_csv_path"):
+        print(f"[AUTO] coherence_scan.csv => {resa.get('scan_csv_path')}")
+
+    return {"ok": True}
+
+
 default_args = {
     "owner": "airflow",
     "start_date": datetime(2025, 1, 1),
@@ -154,6 +241,7 @@ default_args = {
     "retries": 1,
 }
 
+# Define the DAG
 dag = DAG(
     dag_id="bbc_news_pipeline",
     schedule_interval="*/30 * * * *",
@@ -163,12 +251,14 @@ dag = DAG(
     tags=["bbc", "nlp", "scraping"],
 )
 
+# Task: count docs in MongoDB
 t1_count = PythonOperator(
     task_id="get_docs_count",
     python_callable=get_docs_count,
     dag=dag,
 )
 
+# Task: collect URLs from sitemap
 t2_urls = PythonOperator(
     task_id="collect_urls",
     python_callable=get_urls_from_sitemap,
@@ -176,6 +266,7 @@ t2_urls = PythonOperator(
     dag=dag,
 )
 
+# Task: crawl news with Scrapy
 t3_crawl = PythonOperator(
     task_id="crawl_news",
     python_callable=crawl_news,
@@ -183,64 +274,82 @@ t3_crawl = PythonOperator(
     dag=dag,
 )
 
+# Task: clean/process text data
 t4_process = PythonOperator(
     task_id="data_preparation",
-    python_callable=process,
-    op_kwargs={"counts": "{{ ti.xcom_pull('get_docs_count') }}"},
+    python_callable=data_preparation_wrapper,
+    provide_context=True,
     dag=dag,
 )
 
+# Task: topic model with 32 topics
 t5_topic32 = PythonOperator(
     task_id="topic_model_32",
-    python_callable=lambda: topic_model(num_topics=32),
+    python_callable=topic_model_32_wrapper,
+    provide_context=True,
     dag=dag,
 )
 
+# Task: topic model with 12 topics
 t6_topic12 = PythonOperator(
     task_id="topic_model_12",
-    python_callable=lambda: topic_model(num_topics=12),
+    python_callable=topic_model_12_wrapper,
+    provide_context=True,
     dag=dag,
 )
 
-t7_lda_words = PythonOperator(
-    task_id="extract_lda_words",
-    python_callable=lambda ti: ti.xcom_push(
-        key="lda_top_words",
-        value=get_lda_top_words(num_topics=32),
-    ),
+# Task: auto-tune topic model (find best k)
+t6b_topic_auto = PythonOperator(
+    task_id="topic_model_auto",
+    python_callable=topic_model_auto_wrapper,
+    provide_context=True,
     dag=dag,
 )
 
+# Task: publish topic outputs to XCom
+t7_publish = PythonOperator(
+    task_id="publish_topic_outputs",
+    python_callable=publish_topic_outputs,
+    provide_context=True,
+    dag=dag,
+)
+
+# Task: VADER sentiment analysis
 t8_vader = PythonOperator(
     task_id="sentiment_vader",
     python_callable=run_sentiment_analysis_vader,
     dag=dag,
 )
 
+# Task: BERT sentiment analysis
 t9_bert = PythonOperator(
     task_id="sentiment_bert",
     python_callable=run_sentiment_analysis_bert,
     dag=dag,
 )
 
+# Task: DistilRoBERTa sentiment analysis
 t10_emotions = PythonOperator(
     task_id="sentiment_distilroberta",
     python_callable=run_sentiment_analysis_distilroberta,
     dag=dag,
 )
 
+# Task: compute pipeline stats and push to XCom
 t11_stats = PythonOperator(
     task_id="push_statistics",
     python_callable=push_stats_to_xcom,
     dag=dag,
 )
 
+# Task: visualize stats
 t12_visualize = PythonOperator(
     task_id="visualize_pipeline",
     python_callable=visualize_pipeline_stats,
     dag=dag,
 )
 
+# Task dependencies
 t1_count >> t2_urls >> t3_crawl >> t4_process
-t4_process >> [t5_topic32, t6_topic12] >> t7_lda_words
-t7_lda_words >> [t8_vader, t9_bert, t10_emotions] >> t11_stats >> t12_visualize
+t4_process >> [t5_topic32, t6_topic12, t6b_topic_auto] >> t7_publish
+t7_publish >> [t8_vader, t9_bert, t10_emotions] >> t11_stats >> t12_visualize
