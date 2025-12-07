@@ -7,7 +7,6 @@ RUN apt-get update && \
 
 COPY requirements.txt /opt/airflow/requirements.txt
 
-# 仍然用 airflow user 裝 pip（官方建議也偏向這樣）
 USER airflow
 RUN pip install --no-cache-dir apache-airflow-providers-openlineage && \
     pip install --no-cache-dir -r /opt/airflow/requirements.txt
