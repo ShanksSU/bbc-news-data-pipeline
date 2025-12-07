@@ -132,6 +132,8 @@ def run_topic_modeling(
     
     # Build dictionary and corpus (bag-of-words)
     dictionary = corpora.Dictionary(texts)
+    dictionary.filter_extremes(no_below=5, no_above=0.5, keep_n=50000)
+    dictionary.compactify()
     corpus = [dictionary.doc2bow(t) for t in texts]
 
     # Build run root folder: /opt/airflow/models/YYYY-mm-dd_HHMM
