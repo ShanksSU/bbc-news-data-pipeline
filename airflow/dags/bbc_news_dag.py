@@ -151,7 +151,6 @@ def data_preparation_wrapper(**context):
 
 # Train a fixed 32-topic model
 def topic_model_32_wrapper(**context):
-    # 固定 32 topics
     return topic_model(
         num_topics=32,
         auto_tune=False,
