@@ -284,12 +284,15 @@ def run_topic_modeling(
     articles_csv_path = os.path.join(output_dir, f"articles_with_main_topic_{num_topics}.csv")
     df.to_csv(articles_csv_path, index=False, encoding="utf-8-sig")
 
+    df["lda_model_k"] = num_topics  # 12 or 32
+    df["model_run_id"] = run_dir_name # exp: 2025-01-01_1200
+
     # Save results back to MongoDB
     df.drop(columns=["_id"], inplace=True, errors="ignore")
     db[output_collection].delete_many({})
     db[output_collection].insert_many(df.to_dict("records"))
-    print(f"[TopicModel] Results saved to MongoDB → {output_collection}")
-
+    print(f"[TopicModel] Results saved to {output_collection} (k={num_topics})")
+    
     # Return values for XCom usage
     return {
         "run_dir_name": run_dir_name,

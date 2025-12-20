@@ -159,6 +159,7 @@ def topic_model_12_wrapper(**context):
         auto_tune=False,
         topn_words=10,
         save_vis=True,
+        output_collection="articles_topic_12"
     )
 
 # Train a fixed 32-topic model
@@ -168,6 +169,7 @@ def topic_model_32_wrapper(**context):
         auto_tune=False,
         topn_words=10,
         save_vis=True,
+        output_collection="articles_topic_32"
     )
 
 # Auto-tune: scan k and pick the best number of topics
@@ -183,6 +185,7 @@ def topic_model_auto_wrapper(**context):
         scan_iterations=50,
         final_passes=10,
         final_iterations=400,
+        output_collection="articles_topic_auto"
     )
 
 # Collect topic outputs and push to XCom

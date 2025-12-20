@@ -1,12 +1,34 @@
 from __future__ import annotations
 
 import re
+import os
 import string
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Set
 
 import pandas as pd
 from pymongo import MongoClient
 import nltk
+
+def load_custom_stopwords(filename: str = "stop_words.txt") -> Set[str]:
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    file_path = os.path.join(current_dir, filename)
+
+    custom_words = set()
+    
+    if os.path.exists(file_path):
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    word = line.strip().lower()
+                    if word:
+                        custom_words.add(word)
+            print(f"[dataprep] Loaded {len(custom_words)} custom stop words from {filename}")
+        except Exception as e:
+            print(f"[WARN] Failed to read {filename}: {e}")
+    else:
+        print(f"[WARN] {filename} not found at {file_path}. Using default NLTK only.")
+
+    return custom_words
 
 def load_data(counts: Optional[Dict] = None) -> pd.DataFrame:
     # load latest raw articles from mongo
@@ -36,7 +58,7 @@ def export_data(df: pd.DataFrame):
 
 
 # text cleaning
-def clean_text(text: str) -> str:
+def clean_text(text: str, custom_stops: Set[str]) -> str:
     # clean raw text with regex, stopwords, pos filtering
     if not isinstance(text, str):
         return ""
@@ -56,6 +78,8 @@ def clean_text(text: str) -> str:
 
     # stopwords
     stop_words = set(nltk.corpus.stopwords.words("english"))
+    stop_words.update(custom_stops) 
+    
     stop_words.update(["from", "re", "also"])
 
     keep_pos = {
@@ -100,7 +124,7 @@ def process(counts: Optional[Dict] = None, **kwargs):
     # run full preprocessing pipeline
     df = load_data(counts)
     if df.empty:
-        print("⚠ no articles found. skipping.")
+        print("no articles found. skipping.")
         return
 
     print(f"[dataprep] loaded {len(df)} raw articles.")
@@ -115,8 +139,10 @@ def process(counts: Optional[Dict] = None, **kwargs):
     df["n_words"] = df["text"].apply(lambda x: len(str(x).split()))
     df = df[df["n_words"] > 50]  # filter short articles
 
+    custom_stops = load_custom_stopwords("stop_words.txt")
+
     print("[dataprep] cleaning text...")
-    df["article_clean"] = df["text"].apply(clean_text)
+    df["article_clean"] = df["text"].apply(lambda x: clean_text(x, custom_stops))
 
     print("[dataprep] lemmatizing text...")
     lemmatizer = nltk.stem.WordNetLemmatizer()

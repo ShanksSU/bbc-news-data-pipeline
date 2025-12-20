@@ -14,7 +14,7 @@ class SentimentManager:
 
     def load_data(self):
         print(f"[Sentiment] Loading data from {self.input_col}...")
-        cursor = self.db[self.input_col].find({}, {"article_clean": 1, "url": 1, "date": 1})
+        cursor = self.db[self.input_col].find({}, {"article_clean": 1, "url": 1, "date": 1, "category": 1, "topic": 1})
         self.df = pd.DataFrame(list(cursor))
         
         if self.df.empty:
