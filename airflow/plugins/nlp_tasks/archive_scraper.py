@@ -78,7 +78,7 @@ def collect_archive_sitemaps():
         inserted = insert_links_bulk(records)
         total_inserted += inserted
 
-        print(f"  → inserted {inserted} new urls")
+        print(f"inserted {inserted} new urls")
 
     print(f"[archivescraper] completed. total new urls inserted: {total_inserted}")
     return total_inserted

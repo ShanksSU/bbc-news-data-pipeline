@@ -1,3 +1,4 @@
+import numpy as np
 import os
 import glob
 import json
@@ -118,7 +119,8 @@ def run_topic_modeling(
     client = MongoClient("mongo", 27017)
     db = client.bbcnews
 
-    df = pd.DataFrame(list(db["articles_processed"].find({})))
+    cursor = db["articles_processed"].find({}, {"article_clean": 1, "url": 1, "title": 1, "date": 1})
+    df = pd.DataFrame(list(cursor))
     if df.empty:
         print("[TopicModel] No processed articles found.")
         return {"error": "NO_DATA"}
@@ -226,7 +228,15 @@ def run_topic_modeling(
     dictionary.save(dict_path)
 
     if save_vis:
-        vis = gensimvis.prepare(lda_model, corpus, dictionary)
+        vis = gensimvis.prepare(lda_model, corpus, dictionary, mds='mmds')
+        if hasattr(vis, 'topic_coordinates'):
+            for col in vis.topic_coordinates.columns:
+                if vis.topic_coordinates[col].dtype == 'complex128' or vis.topic_coordinates[col].dtype == 'complex':
+                    vis.topic_coordinates[col] = vis.topic_coordinates[col].apply(lambda x: x.real)
+        if hasattr(vis, 'token_table'):
+            for col in vis.token_table.columns:
+                if vis.token_table[col].dtype == 'complex128' or vis.token_table[col].dtype == 'complex':
+                    vis.token_table[col] = vis.token_table[col].apply(lambda x: x.real)
         pyLDAvis.save_html(vis, html_path)
         print(f"[TopicModel] LDA vis saved → {html_path}")
 

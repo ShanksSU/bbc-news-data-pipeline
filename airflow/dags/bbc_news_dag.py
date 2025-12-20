@@ -7,13 +7,16 @@ import pymongo
 
 from airflow import DAG
 from airflow.operators.python import PythonOperator
+from airflow.utils.trigger_rule import TriggerRule
 
 from nlp_tasks.data_preparation import process
 from nlp_tasks.topic_modeling import run_topic_modeling as topic_model
 from nlp_tasks.topic_modeling import get_lda_top_words
-from nlp_tasks.sentiment_analysis_vader import run_sentiment_analysis_vader
-from nlp_tasks.sentiment_analysis_bert import run_sentiment_analysis_bert
-from nlp_tasks.sentiment_analysis_DistilRoBERTa import run_sentiment_analysis_distilroberta
+from nlp_tasks.sentiment_analysis import (
+    run_vader_wrapper, 
+    run_bert_wrapper, 
+    run_distilroberta_wrapper
+)
 from nlp_tasks.stats import push_stats_to_xcom
 from nlp_tasks.stats_visualization import visualize_pipeline_stats
 
@@ -149,15 +152,6 @@ def data_preparation_wrapper(**context):
     counts = context["ti"].xcom_pull(task_ids="get_docs_count")
     return process(counts=counts)
 
-# Train a fixed 32-topic model
-def topic_model_32_wrapper(**context):
-    return topic_model(
-        num_topics=32,
-        auto_tune=False,
-        topn_words=10,
-        save_vis=True,
-    )
-
 # Train a fixed 12-topic model
 def topic_model_12_wrapper(**context):
     return topic_model(
@@ -167,17 +161,26 @@ def topic_model_12_wrapper(**context):
         save_vis=True,
     )
 
+# Train a fixed 32-topic model
+def topic_model_32_wrapper(**context):
+    return topic_model(
+        num_topics=32,
+        auto_tune=False,
+        topn_words=10,
+        save_vis=True,
+    )
+
 # Auto-tune: scan k and pick the best number of topics
 def topic_model_auto_wrapper(**context):
     return topic_model(
         auto_tune=True,
-        topic_min=8,
+        topic_min=10,
         topic_max=40,
-        topic_step=2,
+        topic_step=5,
         topn_words=10,
         save_vis=True,
-        scan_passes=5,
-        scan_iterations=200,
+        scan_passes=2,
+        scan_iterations=50,
         final_passes=10,
         final_iterations=400,
     )
@@ -311,26 +314,27 @@ t7_publish = PythonOperator(
     python_callable=publish_topic_outputs,
     provide_context=True,
     dag=dag,
+    trigger_rule=TriggerRule.ALL_DONE,
 )
 
 # Task: VADER sentiment analysis
 t8_vader = PythonOperator(
     task_id="sentiment_vader",
-    python_callable=run_sentiment_analysis_vader,
+    python_callable=run_vader_wrapper,
     dag=dag,
 )
 
 # Task: BERT sentiment analysis
 t9_bert = PythonOperator(
     task_id="sentiment_bert",
-    python_callable=run_sentiment_analysis_bert,
+    python_callable=run_bert_wrapper,
     dag=dag,
 )
 
 # Task: DistilRoBERTa sentiment analysis
 t10_emotions = PythonOperator(
     task_id="sentiment_distilroberta",
-    python_callable=run_sentiment_analysis_distilroberta,
+    python_callable=run_distilroberta_wrapper,
     dag=dag,
 )
 
@@ -350,5 +354,5 @@ t12_visualize = PythonOperator(
 
 # Task dependencies
 t1_count >> t2_urls >> t3_crawl >> t4_process
-t4_process >> [t5_topic32, t6_topic12, t6b_topic_auto] >> t7_publish
+t4_process >> [t6_topic12, t5_topic32, t6b_topic_auto] >> t7_publish
 t7_publish >> [t8_vader, t9_bert, t10_emotions] >> t11_stats >> t12_visualize
