@@ -2,14 +2,12 @@ import scrapy
 from pymongo import MongoClient
 from bbcNews.items import BbcnewsItem
 
-
 class NewsSpider(scrapy.Spider):
     name = "NewsSpider"
     _mongo_client = None
 
     @staticmethod
     def get_mongo_db():
-        # get mongo db client (singleton)
         if NewsSpider._mongo_client is None:
             NewsSpider._mongo_client = MongoClient("mongo", 27017)
         return NewsSpider._mongo_client["bbcnews"]
@@ -36,7 +34,7 @@ class NewsSpider(scrapy.Spider):
         self.start_urls = [doc["url"] for doc in cursor]
 
         self.logger.info(
-            f"🔎 loaded {len(self.start_urls)} start urls (bbc news article pages)"
+            f"loaded {len(self.start_urls)} start urls (bbc news article pages)"
         )
 
     def parse(self, response):

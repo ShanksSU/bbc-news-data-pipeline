@@ -2,13 +2,18 @@ import pymongo
 import logging
 from scrapy.exceptions import DropItem
 
-
 class DropIfEmptyFieldPipeline:
     def process_item(self, item, spider):
-        if not item.get("title") and (not item.get("text") or item["text"] == "N/A"):
-            raise DropItem("Missing necessary content (title/text).")
-        return item
+            if not item.get("date"):
+                raise DropItem(f"Missing date in: {item.get('url')}")
+                
+            if not item.get("text") or item["text"] == "N/A":
+                raise DropItem(f"Missing text content in: {item.get('url')}")
 
+            if not item.get("title"):
+                raise DropItem(f"Missing title in: {item.get('url')}")
+
+            return item
 
 class MongoPipeline:
     def __init__(self, mongo_uri, mongo_db):
@@ -36,5 +41,4 @@ class MongoPipeline:
             logging.info(f"Inserted: {item.get('url')}")
         except pymongo.errors.DuplicateKeyError:
             logging.info(f"Duplicate skipped: {item.get('url')}")
-
         return item

@@ -154,6 +154,28 @@ def plot_wordcloud_freq(freq_dict, title, path):
     plt.title(title, fontsize=14)
     save_plot(path)
 
+def plot_coherence_scan(csv_path, title, path):
+    if not os.path.exists(csv_path):
+        return
+    df = pd.read_csv(csv_path)
+    if df.empty or "num_topics" not in df.columns or "coherence" not in df.columns:
+        return
+
+    plt.figure(figsize=(10, 6))
+    plt.plot(df["num_topics"], df["coherence"], marker='o', linestyle='-', color='teal', linewidth=2)
+    plt.title(title, fontsize=14)
+    plt.xlabel("Number of Topics (k)")
+    plt.ylabel("Coherence Score (C_v)")
+    plt.grid(True, linestyle='--', alpha=0.5)
+    
+    max_row = df.loc[df["coherence"].idxmax()]
+    plt.annotate(f"Best k={int(max_row['num_topics'])}", 
+                 xy=(max_row['num_topics'], max_row['coherence']), 
+                 xytext=(max_row['num_topics'], max_row['coherence'] + 0.01),
+                 arrowprops=dict(facecolor='red', shrink=0.05))
+
+    save_plot(path)
+
 # Helper: Date Parsing
 def ensure_date_column(df, possible_cols=None):
     if possible_cols is None:
@@ -203,7 +225,7 @@ def visualize_pipeline_stats(output_root="/opt/airflow/dags/output"):
                 
                 if not recent_df.empty:
                     try:
-                        # TF-IDF 計算
+                        # TF-IDF
                         tfidf = TfidfVectorizer(max_features=100, stop_words=list(NEWS_STOPWORDS))
                         tfidf_matrix = tfidf.fit_transform(recent_df["article_clean"].astype(str))
                         feature_names = tfidf.get_feature_names_out()
@@ -308,7 +330,7 @@ def visualize_pipeline_stats(output_root="/opt/airflow/dags/output"):
     target_topic_collections = [
         ("articles_topic_12", "LDA_12_Topics"),
         ("articles_topic_32", "LDA_32_Topics"),
-        ("articles_with_topics", "LDA_Topics_Default")
+        ("articles_topic_auto", "LDA_Topics_Auto")
     ]
 
     for topic_col, model_name in target_topic_collections:
@@ -322,11 +344,44 @@ def visualize_pipeline_stats(output_root="/opt/airflow/dags/output"):
         topic_folder = os.path.join(output_dir, "topics", model_name)
         os.makedirs(topic_folder, exist_ok=True)
         
+        try:
+            if "lda_model_k" in df.columns:
+                num_topics = int(df["lda_model_k"].iloc[0])
+            elif "12" in topic_col:
+                num_topics = 12
+            elif "32" in topic_col:
+                num_topics = 32
+            else:
+                num_topics = df["main_topic"].max() + 1
+        except:
+            num_topics = 12
+        
+        if "auto" in topic_col and "model_run_id" in df.columns and "lda_model_k" in df.columns:
+            try:
+                run_id = df["model_run_id"].iloc[0]
+                k = df["lda_model_k"].iloc[0]
+                models_root = "/opt/airflow/models"
+                
+                scan_csv_path = os.path.join(models_root, str(run_id), f"topic_{k}", "coherence_scan.csv")
+                
+                plot_coherence_scan(
+                    scan_csv_path,
+                    f"LDA Auto-tune Coherence Scan (Best k={k})",
+                    os.path.join(topic_folder, "line_coherence_scan.png")
+                )
+            except Exception as e:
+                print(f"[visualization] Failed to resolve auto-tune path: {e}")
+
         df = ensure_date_column(df)
 
         if "main_topic" in df.columns:
+            topic_counts = df["main_topic"].value_counts()
+            full_index = pd.Index(range(num_topics), name="Topic ID")
+            topic_counts = topic_counts.reindex(full_index, fill_value=0)
+            
             plot_bar(
-                df["main_topic"].value_counts().sort_index(),
+                # df["main_topic"].value_counts().sort_index(),
+                topic_counts, 
                 f"{model_name} - Article Count per Topic",
                 "Topic ID", "Count",
                 os.path.join(topic_folder, "bar_topics.png")
@@ -341,6 +396,10 @@ def visualize_pipeline_stats(output_root="/opt/airflow/dags/output"):
                         aggfunc="count",
                         fill_value=0
                     )
+                    
+                    expected_cols = list(range(num_topics))
+                    pivot = pivot.reindex(columns=expected_cols, fill_value=0)
+                    
                     plt.figure(figsize=(14, 8))
                     sns.heatmap(pivot, cmap="YlOrRd", annot=True, fmt="d", linewidths=.5)
                     plt.title(f"{model_name} - Daily Topic Heatmap", fontsize=14)
@@ -361,16 +420,17 @@ def visualize_pipeline_stats(output_root="/opt/airflow/dags/output"):
 
                 # topics wordcloud 1-12
                 unique_topics = sorted(df["main_topic"].unique())
-                for topic_id in unique_topics[:12]:
+                for topic_id in unique_topics:
                     subset = df[df["main_topic"] == topic_id]
                     if not subset.empty:
                         words = " ".join(subset["article_clean"]).split()
-                        top_words = words[:5000]
-                        plot_wordcloud_simple(
-                            top_words,
-                            f"{model_name} - Topic {topic_id}",
-                            os.path.join(topic_folder, f"wordcloud_topic_{topic_id}.png")
-                        )
+                        if len(words) > 0:
+                            top_words = words[:5000]
+                            plot_wordcloud_simple(
+                                top_words,
+                                f"{model_name} - Topic {topic_id}",
+                                os.path.join(topic_folder, f"wordcloud_topic_{topic_id}.png")
+                            )
 
     print(f"[visualization] completed. all files saved in: {output_dir}")
     return output_dir

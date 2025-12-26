@@ -16,7 +16,7 @@ class IgnoreDupReqMiddleware:
     def process_request(self, request, spider):
         db = self.get_db()
         if db[spider.name].find_one({"url": request.url}):
-            spider.logger.info(f"⚠️ duplicate skipped: {request.url}")
+            spider.logger.info(f"duplicate skipped: {request.url}")
             raise IgnoreRequest()
 
 

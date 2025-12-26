@@ -131,7 +131,8 @@ def crawl_news(**context):
         raise FileNotFoundError("scrapy.cfg not found inside Airflow container.")
 
     print(f"[SCRAPY] Starting spider (docs_count={docs_count})")
-
+    
+    # call class NewsSpider(scrapy.Spider)
     result = subprocess.run(
         ["scrapy", "crawl", "NewsSpider", "-a", f"docs_count={docs_count}"],
         cwd=scrapy_path,
